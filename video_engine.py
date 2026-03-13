@@ -212,12 +212,11 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                 bgm = bgm.subclipped(0, final_video.duration)
                 
             if do_ducking and duck_intervals:
-                def ducking_function(t):
-                    for start, end in duck_intervals:
-                        if start <= t <= end:
-                            return 0.15 # Duck to 15% volume
-                    return 1.0
-                bgm = bgm.with_effects([afx.Volumex(ducking_function)])
+                ducking_effects = []
+                for start, end in duck_intervals:
+                    ducking_effects.append(afx.MultiplyVolume(0.15, start_time=start, end_time=end))
+                
+                bgm = bgm.with_effects(ducking_effects)
                 
                 # Combine original video audio with ducked BGM
                 if final_video.audio:
