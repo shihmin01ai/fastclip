@@ -69,6 +69,15 @@ class FastClipApp:
         self.do_ducking_var = tk.BooleanVar(value=False)
         tk.Checkbutton(settings_frame, text="背景樂閃避", variable=self.do_ducking_var, bg="#f8f9fa", font=("Microsoft JhengHei", 8)).grid(row=0, column=4, padx=(15, 0))
 
+        # Output Aspect Ratio
+        tk.Label(main_frame, text="輸出比例:", bg="#f8f9fa", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w", pady=(5, 0))
+        ratio_frame = tk.Frame(main_frame, bg="#f8f9fa")
+        ratio_frame.pack(fill="x", pady=(2, 5))
+        self.ratio_var = tk.StringVar(value="橫式 (16:9)")
+        self.ratio_options = ["橫式 (16:9)", "直式 (9:16)"]
+        self.ratio_combo = ttk.Combobox(ratio_frame, textvariable=self.ratio_var, values=self.ratio_options, state="readonly", font=("Microsoft JhengHei", 9))
+        self.ratio_combo.pack(side="left", fill="x", expand=True)
+
         # Audio Source
         tk.Label(main_frame, text="2. 背景音樂 (YouTube 網址或檔案):", bg="#f8f9fa", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w", pady=(5, 0))
         audio_frame = tk.Frame(main_frame, bg="#f8f9fa")
@@ -182,9 +191,14 @@ class FastClipApp:
             return
 
         self.start_btn.config(state="disabled")
-        threading.Thread(target=self.process_thread, args=(media_dir, audio_src, out_dir, total_sec, 3, v_max), daemon=True).start()
+        
+        # Determine target resolution
+        ratio_str = self.ratio_var.get()
+        target_res = (1920, 1080) if "16:9" in ratio_str else (1080, 1920)
+        
+        threading.Thread(target=self.process_thread, args=(media_dir, audio_src, out_dir, total_sec, 3, v_max, target_res), daemon=True).start()
 
-    def process_thread(self, media_dir, audio_src, out_dir, duration, c_min, c_max):
+    def process_thread(self, media_dir, audio_src, out_dir, duration, c_min, c_max, target_res):
         try:
             self.update_status("正在準備素材...", 5)
             audio_path = video_engine.download_audio(audio_src)
@@ -213,7 +227,7 @@ class FastClipApp:
 
             self.update_status("正在啟動合成引擎...", 10)
             do_ducking = self.do_ducking_var.get()
-            video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb, do_ducking=do_ducking)
+            video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb, do_ducking=do_ducking, target_res=target_res)
             
             self.update_status("正在整理最終檔案...", 95)
             # Copy audio to output folder if it's a downloaded file
