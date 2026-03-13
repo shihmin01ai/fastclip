@@ -179,7 +179,8 @@ class FastClipApp:
             audio_path = video_engine.download_audio(audio_src)
             
             self.update_status("正在合成影片中...", 10)
-            output_name = f"FastClip_Output_{int(time.time())}.mp4"
+            now_str = datetime.datetime.now().strftime("%Y%m%d%H%M")
+            output_name = f"FastClip_{now_str}.mp4"
             output_path = os.path.join(out_dir, output_name)
             
             def prog_cb(p):
@@ -188,6 +189,10 @@ class FastClipApp:
 
             video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb)
             
+            # Check if output is healthy (more than 1KB)
+            if os.path.exists(output_path) and os.path.getsize(output_path) < 2000:
+                raise RuntimeError("產出的影片檔異常偏小（僅 1KB），可能是合成過程中斷或記憶體不足。請嘗試縮短長度或換一個背景音樂網址！")
+
             self.update_status("製作成功！", 100)
             messagebox.showinfo("成功", f"影片產出成功！\n存檔路徑：{output_path}")
         except Exception as e:
