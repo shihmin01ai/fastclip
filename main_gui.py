@@ -48,23 +48,24 @@ class FastClipApp:
         self.count_label.pack(anchor="w", pady=(0, 8))
 
         # Smart Inputs (Side by Side)
-        settings_frame = tk.LabelFrame(main_frame, text="素材時長設定 (秒)", bg="#f8f9fa", font=("Microsoft JhengHei", 8), padx=10, pady=5)
-        settings_frame.pack(fill="x", pady=5)
+        settings_frame.columnconfigure(0, weight=0)
+        settings_frame.columnconfigure(1, weight=0)
+        settings_frame.columnconfigure(2, weight=0)
+        settings_frame.columnconfigure(3, weight=0)
+        settings_frame.columnconfigure(4, weight=0)
 
-        settings_frame.columnconfigure(0, weight=1)
-        settings_frame.columnconfigure(1, weight=1)
-        settings_frame.columnconfigure(2, weight=1)
-        settings_frame.columnconfigure(3, weight=1)
-
-        tk.Label(settings_frame, text="照片 (2~5):", bg="#f8f9fa").grid(row=0, column=0, sticky="e")
+        tk.Label(settings_frame, text="照片 (2~5):", bg="#f8f9fa").grid(row=0, column=0, sticky="w")
         self.photo_dur_var = tk.StringVar(value="3")
         self.photo_dur_var.trace_add("write", lambda *args: self.auto_calc_total())
-        tk.Entry(settings_frame, textvariable=self.photo_dur_var, width=8).grid(row=0, column=1, sticky="w", padx=(5, 20))
+        tk.Entry(settings_frame, textvariable=self.photo_dur_var, width=8).grid(row=0, column=1, sticky="w", padx=(5, 15))
 
-        tk.Label(settings_frame, text="影片 (5~30):", bg="#f8f9fa").grid(row=0, column=2, sticky="e")
+        tk.Label(settings_frame, text="影片 (5~30):", bg="#f8f9fa").grid(row=0, column=2, sticky="w")
         self.video_dur_var = tk.StringVar(value="8")
         self.video_dur_var.trace_add("write", lambda *args: self.auto_calc_total())
-        tk.Entry(settings_frame, textvariable=self.video_dur_var, width=8).grid(row=0, column=3, sticky="w", padx=(5, 0))
+        tk.Entry(settings_frame, textvariable=self.video_dur_var, width=8).grid(row=0, column=3, sticky="w", padx=5)
+
+        self.do_ducking_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(settings_frame, text="背景樂閃避", variable=self.do_ducking_var, bg="#f8f9fa", font=("Microsoft JhengHei", 8)).grid(row=0, column=4, padx=(15, 0))
 
         # Audio Source
         tk.Label(main_frame, text="2. 背景音樂 (YouTube 網址或檔案):", bg="#f8f9fa", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w", pady=(5, 0))
@@ -209,7 +210,8 @@ class FastClipApp:
                     self.update_status("正在處理中...", 10 + (data * 0.85))
 
             self.update_status("正在啟動合成引擎...", 10)
-            video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb)
+            do_ducking = self.do_ducking_var.get()
+            video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb, do_ducking=do_ducking)
             
             self.update_status("正在整理最終檔案...", 95)
             # Copy audio to output folder if it's a downloaded file

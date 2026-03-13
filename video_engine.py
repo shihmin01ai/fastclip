@@ -80,14 +80,14 @@ class GuiLogger(proglog.ProgressBarLogger):
                 'percentage': (display_index / display_total) * 100
             })
 
-def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None):
+def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None, do_ducking=False):
     """Assemble images and videos into a single video with background music."""
     try:
-        from moviepy import ImageClip, VideoFileClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeVideoClip
+        from moviepy import ImageClip, VideoFileClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeVideoClip, CompositeAudioClip
         import moviepy.video.fx as vfx
         import moviepy.audio.fx as afx
         
-        log_message(f"Starting video creation: target={target_duration_sec}s, output={output_path}")
+        log_message(f"Starting video creation: target={target_duration_sec}s, output={output_path}, ducking={do_ducking}")
 
         # List all media files
         valid_img_exts = ('.jpg', '.jpeg', '.png', '.bmp')
@@ -112,6 +112,11 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             for f in vid_files:
                 path = os.path.join(media_dir, f)
                 clip = VideoFileClip(path)
+                
+                # If no ducking, we strip audio from source
+                if not do_ducking:
+                    clip = clip.without_audio()
+                
                 clip.fps = FPS
                 
                 original_dur = clip.duration
@@ -152,7 +157,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                     clip = clip.resized(width=1920)
                 
                 final_img_dur = clip.duration
-                # Re-enabling Ken Burns
+                # Ken Burns
                 if random.random() > 0.5:
                     clip = clip.resized(lambda t: 1.0 + 0.1 * (t / final_img_dur))
                 else:
@@ -165,24 +170,34 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                 img_clips.append(comp)
                 
             final_clips = []
+            duck_intervals = []
+            curr_time = 0.0
+            
             vid_idx = 0
             img_idx = 0
             for f in files:
+                is_vid = False
                 if f.lower().endswith(valid_img_exts):
                     clip = img_clips[img_idx]
                     img_idx += 1
                 else:
                     clip = loaded_vid_clips[vid_idx]
                     vid_idx += 1
+                    is_vid = True
                     
                 if len(final_clips) > 0:
                     trans_dur = min(0.5, clip.duration / 2)
                     if trans_dur > 0:
                         clip = clip.with_effects([vfx.CrossFadeIn(trans_dur)])
+                        # Account for overlap in timestamps
+                        curr_time -= trans_dur
+                
+                if is_vid and do_ducking:
+                    duck_intervals.append((curr_time, curr_time + clip.duration))
                 
                 final_clips.append(clip)
+                curr_time += clip.duration
          
-            # Restoring transitions and compose method
             final_video = concatenate_videoclips(final_clips, method="compose", padding=-0.5)
             final_video.fps = FPS
             
@@ -190,24 +205,39 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                 final_video = final_video.with_duration(target_duration_sec)
             
             log_message(f"Loading audio: {audio_path}")
-            audio = AudioFileClip(audio_path)
-            if audio.duration < final_video.duration:
-                audio = audio.with_effects([afx.AudioLoop(duration=final_video.duration)])
+            bgm = AudioFileClip(audio_path)
+            if bgm.duration < final_video.duration:
+                bgm = bgm.with_effects([afx.AudioLoop(duration=final_video.duration)])
             else:
-                audio = audio.subclipped(0, final_video.duration)
+                bgm = bgm.subclipped(0, final_video.duration)
                 
-            audio = audio.with_effects([afx.AudioFadeOut(2)])
-            final_video = final_video.with_audio(audio)
+            if do_ducking and duck_intervals:
+                def ducking_function(t):
+                    for start, end in duck_intervals:
+                        if start <= t <= end:
+                            return 0.15 # Duck to 15% volume
+                    return 1.0
+                bgm = bgm.with_effects([afx.Volumex(ducking_function)])
+                
+                # Combine original video audio with ducked BGM
+                if final_video.audio:
+                    final_audio = CompositeAudioClip([bgm, final_video.audio])
+                else:
+                    final_audio = bgm
+            else:
+                final_audio = bgm
+                
+            final_audio = final_audio.with_effects([afx.AudioFadeOut(2)])
+            final_video = final_video.with_audio(final_audio)
             
             # Accurate frame count for progress bar
             total_frames = int(final_video.duration * FPS)
             logger = GuiLogger(progress_callback, expected_frames=total_frames) if progress_callback else None
             log_message("Starting write_videofile...")
             
-            # Using multi-threading again
             final_video.write_videofile(
                 output_path, 
-                fps=24, 
+                fps=FPS, 
                 codec="libx264", 
                 audio_codec="aac", 
                 threads=os.cpu_count() or 4,
