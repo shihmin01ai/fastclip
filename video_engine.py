@@ -1,16 +1,12 @@
 import os
 import sys
-import yt_dlp
-import imageio_ffmpeg
-from moviepy import ImageClip, VideoFileClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeVideoClip
-# In MoviePy 2.x, effects are accessed differently
-import moviepy.video.fx as vfx
-import moviepy.audio.fx as afx
-from PIL import Image
 import random
 
 def download_audio(url_or_path, output_dir="temp"):
     """Download audio from YouTube or copy local file."""
+    import yt_dlp
+    import imageio_ffmpeg
+    
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -72,6 +68,10 @@ class GuiLogger:
 
 def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None):
     """Assemble images and videos into a single video with background music."""
+    from moviepy import ImageClip, VideoFileClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeVideoClip
+    import moviepy.video.fx as vfx
+    import moviepy.audio.fx as afx
+
     # List all media files
     valid_img_exts = ('.jpg', '.jpeg', '.png', '.bmp')
     valid_vid_exts = ('.mp4', '.mov', '.avi')
