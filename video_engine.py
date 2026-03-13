@@ -64,12 +64,14 @@ class GuiLogger(proglog.ProgressBarLogger):
     def bars_callback(self, bar_prefix, bar, index, total):
         # MoviePy 2.x uses this for frames/tasks
         if total and total > 0:
+            # Cap index at total to avoid "55/54"
+            display_index = min(index, total)
             # Pass detailed info back as a dict
             self.gui_callback({
                 'prefix': bar_prefix,
-                'index': index,
+                'index': display_index,
                 'total': total,
-                'percentage': (index / total) * 100
+                'percentage': (display_index / total) * 100
             })
 
 def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None):

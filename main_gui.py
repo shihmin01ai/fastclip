@@ -192,21 +192,20 @@ class FastClipApp:
                     total = data.get('total', 1)
                     p = data.get('percentage', 0)
                     
-                    if "frame" in prefix.lower() or "chunk" in prefix.lower():
+                    # Focus strictly on the core rendering task
+                    if prefix == "frame_index":
                         msg = f"正在合成影片 (第 {idx}/{total} 幀)..."
-                    elif "t" == prefix or "audio" in prefix.lower():
-                        msg = "正在處理音訊..."
-                    else:
-                        msg = "正在合成影片中..."
-                    
-                    # rendering takes up 10% to 100% of the bar
-                    self.update_status(msg, 10 + (p * 0.9))
+                        # weighted: 10% prep + 85% rendering
+                        self.update_status(msg, 10 + (p * 0.85))
+                    elif "audio" in prefix.lower():
+                        self.update_status("正在處理音軌...", 10)
                 else:
-                    # Fallback for simple percentage
-                    self.update_status("正在合成影片中...", 10 + (data * 0.9))
+                    self.update_status("正在處理中...", 10 + (data * 0.85))
 
+            self.update_status("正在啟動合成引擎...", 10)
             video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb)
             
+            self.update_status("正在整理最終檔案...", 95)
             # Copy audio to output folder if it's a downloaded file
             if "temp" in audio_path and os.path.exists(audio_path):
                 audio_ext = os.path.splitext(audio_path)[1]
