@@ -1,9 +1,11 @@
 __pycache__/
-bui*.log
+build/
+dist/
+*.spec
+temp/
+*.mp4
+*.log
 *.code-workspace
 debug*.py
 test_single.py
-相片/
-*.mp4
-*.log
 相片/
