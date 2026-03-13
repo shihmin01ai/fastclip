@@ -185,9 +185,25 @@ class FastClipApp:
             output_name = f"FastClip_{now_str}.mp4"
             output_path = os.path.join(out_dir, output_name)
             
-            def prog_cb(p):
-                # rendering takes up 10% to 100% of the bar
-                self.update_status("正在合成影片中...", 10 + (p * 0.9))
+            def prog_cb(data):
+                if isinstance(data, dict):
+                    prefix = data.get('prefix', '')
+                    idx = data.get('index', 0)
+                    total = data.get('total', 1)
+                    p = data.get('percentage', 0)
+                    
+                    if "frame" in prefix.lower() or "chunk" in prefix.lower():
+                        msg = f"正在合成影片 (第 {idx}/{total} 幀)..."
+                    elif "t" == prefix or "audio" in prefix.lower():
+                        msg = "正在處理音訊..."
+                    else:
+                        msg = "正在合成影片中..."
+                    
+                    # rendering takes up 10% to 100% of the bar
+                    self.update_status(msg, 10 + (p * 0.9))
+                else:
+                    # Fallback for simple percentage
+                    self.update_status("正在合成影片中...", 10 + (data * 0.9))
 
             video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb)
             
