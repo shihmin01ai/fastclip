@@ -5,6 +5,8 @@ import os
 import video_engine
 import time
 import sys
+import datetime
+import shutil
 
 class NullWriter:
     def write(self, arg): pass
@@ -189,6 +191,15 @@ class FastClipApp:
 
             video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb)
             
+            # Copy audio to output folder if it's a downloaded file
+            if "temp" in audio_path and os.path.exists(audio_path):
+                audio_ext = os.path.splitext(audio_path)[1]
+                audio_out = os.path.join(out_dir, f"FastClip_{now_str}_背景音樂{audio_ext}")
+                try:
+                    shutil.copy2(audio_path, audio_out)
+                except Exception:
+                    pass
+
             # Check if output is healthy (more than 1KB)
             if os.path.exists(output_path) and os.path.getsize(output_path) < 2000:
                 raise RuntimeError("產出的影片檔異常偏小（僅 1KB），可能是合成過程中斷或記憶體不足。請嘗試縮短長度或換一個背景音樂網址！")
