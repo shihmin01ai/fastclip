@@ -53,34 +53,19 @@ def download_audio(url_or_path, output_dir="temp"):
     else:
         return url_or_path
 
-class GuiLogger:
+import proglog
+
+class GuiLogger(proglog.ProgressBarLogger):
     """Custom logger to send progress back to the GUI callback."""
     def __init__(self, callback):
-        self.callback = callback
-    
-    def __call__(self, **kwargs):
-        return self
-
-    def log(self, type=None, message=None, values=None, **kwargs):
-        # Fallback for some MoviePy operations
-        if type == 'progress' and values and 'index' in values and 'total' in values:
-            if values['total'] > 0:
-                progress = (values['index'] / values['total']) * 100
-                self.callback(progress)
-
-    def iter_bar(self, **kwargs):
-        # MoviePy 2.x passes the generator/iterable here. 
-        # Crucial to return it so MoviePy can actually run the loop.
-        it = kwargs.get('iterable')
-        if it is not None:
-            return it
-        return []
+        super().__init__()
+        self.gui_callback = callback
     
     def bars_callback(self, bar_prefix, bar, index, total):
-        # Granular progress updates for frames/tasks
+        # MoviePy 2.x uses this for frames/tasks
         if total and total > 0:
             progress = (index / total) * 100
-            self.callback(progress)
+            self.gui_callback(progress)
 
 def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None):
     """Assemble images and videos into a single video with background music."""
@@ -149,6 +134,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                     clip = clip.resized(width=1920)
                 
                 final_img_dur = clip.duration
+                # Re-enabling Ken Burns
                 if random.random() > 0.5:
                     clip = clip.resized(lambda t: 1.0 + 0.1 * (t / final_img_dur))
                 else:
@@ -176,9 +162,10 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                 
                 final_clips.append(clip)
          
+            # Restoring transitions and compose method
             final_video = concatenate_videoclips(final_clips, method="compose", padding=-0.5)
             
-            if abs(final_video.duration - target_duration_sec) < 2.0:
+            if abs(final_video.duration - target_duration_sec) < 5.0:
                 final_video = final_video.with_duration(target_duration_sec)
             
             log_message(f"Loading audio: {audio_path}")
@@ -193,12 +180,14 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             
             logger = GuiLogger(progress_callback) if progress_callback else None
             log_message("Starting write_videofile...")
+            
+            # Using multi-threading again
             final_video.write_videofile(
                 output_path, 
                 fps=24, 
                 codec="libx264", 
                 audio_codec="aac", 
-                threads=4, # Use fixed threads for stability
+                threads=os.cpu_count() or 4,
                 logger=logger
             )
             log_message("write_videofile finished successfully.")
