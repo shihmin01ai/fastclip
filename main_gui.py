@@ -48,6 +48,8 @@ class FastClipApp:
         self.count_label.pack(anchor="w", pady=(0, 8))
 
         # Smart Inputs (Side by Side)
+        settings_frame = tk.LabelFrame(main_frame, text="素材時長設定 (秒)", bg="#f8f9fa", font=("Microsoft JhengHei", 8), padx=10, pady=5)
+        settings_frame.pack(fill="x", pady=5)
         settings_frame.columnconfigure(0, weight=0)
         settings_frame.columnconfigure(1, weight=0)
         settings_frame.columnconfigure(2, weight=0)
