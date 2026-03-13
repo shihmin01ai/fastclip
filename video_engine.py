@@ -50,15 +50,21 @@ class GuiLogger:
         return self
 
     def log(self, type=None, message=None, values=None, **kwargs):
+        # Fallback for some MoviePy operations
         if type == 'progress' and values and 'index' in values and 'total' in values:
-            progress = (values['index'] / values['total']) * 100
-            self.callback(progress)
+            if values['total'] > 0:
+                progress = (values['index'] / values['total']) * 100
+                self.callback(progress)
 
     def iter_bar(self, **kwargs):
-        return self
+        # CRITICAL: Must return the iterable for MoviePy to loop over it
+        return kwargs.get('iterable', [])
     
-    def bars_callback(self, **kwargs):
-        pass
+    def bars_callback(self, bar_prefix, bar, index, total):
+        # Granular progress updates for frames/tasks
+        if total > 0:
+            progress = (index / total) * 100
+            self.callback(progress)
 
 def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None):
     """Assemble images and videos into a single video with background music."""
