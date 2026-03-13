@@ -199,89 +199,34 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             
             vid_idx = 0
             img_idx = 0
-            media_clips = []
             for f in files:
+                is_vid = False
                 if f.lower().endswith(valid_img_exts):
-                    media_clips.append(img_clips[img_idx])
+                    clip = img_clips[img_idx]
                     img_idx += 1
                 else:
-                    media_clips.append(loaded_vid_clips[vid_idx])
+                    clip = loaded_vid_clips[vid_idx]
                     vid_idx += 1
-            
-            # Combine vertical clips into collages if target is landscape
-            final_clips = []
-            duck_intervals = []
-            curr_time = 0.0
-            
-            i = 0
-            while i < len(media_clips):
-                clip = media_clips[i]
+                    is_vid = True
                 
-                # Check if we should do split-screen (Landscape output but portrait content)
-                # We look ahead to see if next clips are also portrait
-                is_portrait = clip.w < clip.h
-                do_split = is_portrait and RES[0] > RES[1]
-                
-                if do_split:
-                    group = [clip]
-                    # Try to find up to 2 or 3 total portrait clips to put side-by-side
-                    while len(group) < 3 and (i + 1) < len(media_clips):
-                        next_clip = media_clips[i+1]
-                        if next_clip.w < next_clip.h:
-                            group.append(next_clip)
-                            i += 1
-                        else:
-                            break
-                    
-                    if len(group) > 1:
-                        # Create split screen
-                        sw = RES[0] // len(group)
-                        sh = RES[1]
-                        dur = min(c.duration for c in group)
-                        
-                        positioned_clips = []
-                        for idx, c in enumerate(group):
-                            # Resize to fit its slot
-                            c_res = c.resized(height=sh)
-                            if c_res.w > sw:
-                                x1_c = max(0, (c_res.w - sw) // 2)
-                                c_res = c_res.cropped(x1=x1_c, y1=0, x2=x1_c+sw, y2=sh)
-                            
-                            positioned_clips.append(c_res.with_position((idx * sw, 0)).with_duration(dur))
-                        
-                        clip = CompositeVideoClip(positioned_clips, size=RES).with_duration(dur)
-                    else:
-                        # Just a single portrait clip, handle via process_aspect_ratio (already done)
-                        pass
-                
-                # Apply transition
+                # Apply transition (CrossFadeIn)
+                # Note: We handle the overlapping manually via curr_time
                 if len(final_clips) > 0:
                     trans_dur = min(0.5, clip.duration / 2)
                     if trans_dur > 0:
                         clip = clip.with_effects([vfx.CrossFadeIn(trans_dur)])
                         curr_time -= trans_dur
                 
-                # Track ducking for original videos
-                # (Note: if it's a collage of multiple, we simplified it to use the primary duration)
-                # Actually, our current simple logic doesn't easily track which part of the collage has audio
-                # So we only track ducking for non-collage videos or individual videos
-                # If it's a single video clip (not collage), we check if it was originally a vid
-                # We can't easily tell here, so we check if any original in group was a vid
-                # For simplicity, we skip complex ducking for collages
-                if len(group if 'group' in locals() else []) == 1:
-                    # check if this specific clip was originally a video
-                    # We can use a custom attribute or just re-check the files list
-                    # For now, let's just use the previous logic for non-collages
-                    # But since we changed the loop, we need to adapt
-                    if 'group' in locals() and len(group) == 1:
-                        # Previous logic for single clips
-                        pass
-
-                final_clips.append(clip)
+                # Important: ducking interval must match the clip's final position in the timeline
+                if is_vid and do_ducking:
+                    duck_intervals.append((curr_time, curr_time + clip.duration))
+                    
+                final_clips.append(clip.with_start(curr_time))
                 curr_time += clip.duration
-                i += 1
          
-            final_video = concatenate_videoclips(final_clips, method="compose", padding=-0.5)
+            # Using CompositeVideoClip instead of concatenate_videoclips 
+            # because we already manually handled start times and transitions
+            final_video = CompositeVideoClip(final_clips, size=RES)
             final_video.fps = FPS
             
             if abs(final_video.duration - target_duration_sec) < 5.0:
@@ -295,6 +240,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                 bgm = bgm.subclipped(0, final_video.duration)
                 
             if do_ducking and duck_intervals:
+                log_message(f"Applying ducking to {len(duck_intervals)} intervals.")
                 ducking_effects = []
                 for start, end in duck_intervals:
                     ducking_effects.append(afx.MultiplyVolume(0.15, start_time=start, end_time=end))
@@ -302,6 +248,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                 bgm = bgm.with_effects(ducking_effects)
                 
                 if final_video.audio:
+                    log_message("Merging BGM with source audio...")
                     final_audio = CompositeAudioClip([bgm, final_video.audio])
                 else:
                     final_audio = bgm
@@ -314,13 +261,15 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             # Accurate frame count for progress bar
             total_frames = int(final_video.duration * FPS)
             logger = GuiLogger(progress_callback, expected_frames=total_frames) if progress_callback else None
-            log_message("Starting write_videofile...")
+            log_message(f"Starting write_videofile... duration={final_video.duration}")
             
             final_video.write_videofile(
                 output_path, 
                 fps=FPS, 
                 codec="libx264", 
                 audio_codec="aac",
+                audio_bitrate="192k",
+                audio_fps=44100,
                 logger=logger
             )
             log_message("write_videofile finished successfully.")

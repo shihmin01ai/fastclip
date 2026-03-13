@@ -13,7 +13,7 @@ print("Testing Landscape (16:9) with vertical media...")
 try:
     video_engine.create_video(
         media_dir=media_dir,
-        audio_path="相片/LINE_ALBUM_20230608 畢業典禮_230620_14.MOV", # Use a local file as audio if needed or a dummy
+        audio_path="C:/Users/user/Music/FastClip_202603131635_背景音樂.mp3",
         target_duration_sec=10,
         output_path="test_landscape.mp4",
         target_res=(1920, 1080)
@@ -27,7 +27,7 @@ print("\nTesting Portrait (9:16)...")
 try:
     video_engine.create_video(
         media_dir=media_dir,
-        audio_path="相片/LINE_ALBUM_20230608 畢業典禮_230620_14.MOV",
+        audio_path="C:/Users/user/Music/FastClip_202603131635_背景音樂.mp3",
         target_duration_sec=10,
         output_path="test_portrait.mp4",
         target_res=(1080, 1920)
