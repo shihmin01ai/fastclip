@@ -22,6 +22,7 @@ class FastClipApp:
         self.root = root
         self.root.title("FastClip - 智慧剪輯師")
         self.root.geometry("500x530")
+        self.root.resizable(False, False)
         self.root.configure(bg="#f8f9fa")
 
         # Styles
@@ -50,15 +51,20 @@ class FastClipApp:
         settings_frame = tk.LabelFrame(main_frame, text="素材時長設定 (秒)", bg="#f8f9fa", font=("Microsoft JhengHei", 8), padx=10, pady=5)
         settings_frame.pack(fill="x", pady=5)
 
-        tk.Label(settings_frame, text="照片 (2~5):", bg="#f8f9fa").grid(row=0, column=0, sticky="w")
+        settings_frame.columnconfigure(0, weight=1)
+        settings_frame.columnconfigure(1, weight=1)
+        settings_frame.columnconfigure(2, weight=1)
+        settings_frame.columnconfigure(3, weight=1)
+
+        tk.Label(settings_frame, text="照片 (2~5):", bg="#f8f9fa").grid(row=0, column=0, sticky="e")
         self.photo_dur_var = tk.StringVar(value="3")
         self.photo_dur_var.trace_add("write", lambda *args: self.auto_calc_total())
-        tk.Entry(settings_frame, textvariable=self.photo_dur_var, width=8).grid(row=0, column=1, sticky="w", padx=(5, 15))
+        tk.Entry(settings_frame, textvariable=self.photo_dur_var, width=8).grid(row=0, column=1, sticky="w", padx=(5, 20))
 
-        tk.Label(settings_frame, text="影片 (5~30):", bg="#f8f9fa").grid(row=0, column=2, sticky="w")
+        tk.Label(settings_frame, text="影片 (5~30):", bg="#f8f9fa").grid(row=0, column=2, sticky="e")
         self.video_dur_var = tk.StringVar(value="8")
         self.video_dur_var.trace_add("write", lambda *args: self.auto_calc_total())
-        tk.Entry(settings_frame, textvariable=self.video_dur_var, width=8).grid(row=0, column=3, sticky="w", padx=5)
+        tk.Entry(settings_frame, textvariable=self.video_dur_var, width=8).grid(row=0, column=3, sticky="w", padx=(5, 0))
 
         # Audio Source
         tk.Label(main_frame, text="2. 背景音樂 (YouTube 網址或檔案):", bg="#f8f9fa", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w", pady=(5, 0))
