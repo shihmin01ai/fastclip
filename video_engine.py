@@ -57,21 +57,27 @@ import proglog
 
 class GuiLogger(proglog.ProgressBarLogger):
     """Custom logger to send progress back to the GUI callback."""
-    def __init__(self, callback):
+    def __init__(self, callback, expected_frames=None):
         super().__init__()
         self.gui_callback = callback
+        self.expected_frames = expected_frames
     
     def bars_callback(self, bar_prefix, bar, index, total):
         # MoviePy 2.x uses this for frames/tasks
-        if total and total > 0:
-            # Cap index at total to avoid "55/54"
-            display_index = min(index, total)
+        # We override the 'total' for frame_index to keep it stable
+        display_total = total
+        if bar_prefix == "frame_index" and self.expected_frames:
+            display_total = self.expected_frames
+            
+        if display_total and display_total > 0:
+            # Cap index at total to avoid overshooting
+            display_index = min(index, display_total)
             # Pass detailed info back as a dict
             self.gui_callback({
                 'prefix': bar_prefix,
                 'index': display_index,
-                'total': total,
-                'percentage': (display_index / total) * 100
+                'total': display_total,
+                'percentage': (display_index / display_total) * 100
             })
 
 def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None):
@@ -94,6 +100,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
 
         # Target resolution
         RES = (1920, 1080)
+        FPS = 24
         
         loaded_vid_clips = []
         img_clips = []
@@ -105,6 +112,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             for f in vid_files:
                 path = os.path.join(media_dir, f)
                 clip = VideoFileClip(path)
+                clip.fps = FPS
                 
                 original_dur = clip.duration
                 take_dur = min(max(original_dur, min_clip_dur), max_clip_dur)
@@ -118,7 +126,9 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                     clip = clip.resized(width=1920)
                 
                 bg = ColorClip(size=RES, color=(0,0,0)).with_duration(clip.duration)
+                bg.fps = FPS
                 comp = CompositeVideoClip([bg, clip.with_position("center")])
+                comp.fps = FPS
                 loaded_vid_clips.append(comp)
             
             num_vids = len(loaded_vid_clips)
@@ -136,6 +146,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             for f in img_files:
                 path = os.path.join(media_dir, f)
                 clip = ImageClip(path).with_duration(img_duration)
+                clip.fps = FPS
                 clip = clip.resized(height=1080)
                 if clip.w > 1920:
                     clip = clip.resized(width=1920)
@@ -148,7 +159,9 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
                     clip = clip.resized(lambda t: 1.1 - 0.1 * (t / final_img_dur))
                 
                 bg = ColorClip(size=RES, color=(0,0,0)).with_duration(clip.duration)
+                bg.fps = FPS
                 comp = CompositeVideoClip([bg, clip.with_position("center")])
+                comp.fps = FPS
                 img_clips.append(comp)
                 
             final_clips = []
@@ -171,6 +184,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
          
             # Restoring transitions and compose method
             final_video = concatenate_videoclips(final_clips, method="compose", padding=-0.5)
+            final_video.fps = FPS
             
             if abs(final_video.duration - target_duration_sec) < 5.0:
                 final_video = final_video.with_duration(target_duration_sec)
@@ -185,7 +199,9 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             audio = audio.with_effects([afx.AudioFadeOut(2)])
             final_video = final_video.with_audio(audio)
             
-            logger = GuiLogger(progress_callback) if progress_callback else None
+            # Accurate frame count for progress bar
+            total_frames = int(final_video.duration * FPS)
+            logger = GuiLogger(progress_callback, expected_frames=total_frames) if progress_callback else None
             log_message("Starting write_videofile...")
             
             # Using multi-threading again
