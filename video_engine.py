@@ -86,6 +86,8 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
         from moviepy import ImageClip, VideoFileClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeVideoClip, CompositeAudioClip
         import moviepy.video.fx as vfx
         import moviepy.audio.fx as afx
+        import numpy as np
+        from PIL import Image, ImageFilter
         
         log_message(f"Starting video creation: target={target_duration_sec}s, res={target_res}, output={output_path}, ducking={do_ducking}")
 
@@ -116,15 +118,18 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             
             # Otherwise, create blurred background
             # 1. Background: resize to fill and blur
-            bg = clip.resized(width=tw) if clip_ratio > target_ratio else clip.resized(height=th)
+            bg = clip.resized(height=th) if clip_ratio > target_ratio else clip.resized(width=tw)
             # Center crop bg to target_res
             x1 = max(0, (bg.w - tw) // 2)
             y1 = max(0, (bg.h - th) // 2)
             bg = bg.cropped(x1=x1, y1=y1, x2=x1+tw, y2=y1+th)
             try:
-                # MoviePy 2.x blur effect
-                bg = bg.with_effects([vfx.GaussianBlur(sigma_x=20, sigma_y=20)])
-            except:
+                def blur_frame(image):
+                    pil_img = Image.fromarray(image)
+                    pil_img = pil_img.filter(ImageFilter.GaussianBlur(radius=20))
+                    return np.array(pil_img)
+                bg = bg.image_transform(blur_frame)
+            except Exception as e:
                 # Fallback or older moviepy
                 pass
             
