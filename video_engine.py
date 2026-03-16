@@ -3,6 +3,8 @@ import sys
 import random
 import traceback
 import time
+import subprocess
+import re
 
 def log_message(msg):
     """Write debug messages to a local log file."""
@@ -13,18 +15,20 @@ def log_message(msg):
     except Exception:
         pass
 
+def get_ffmpeg_path():
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
 def download_audio(url_or_path, output_dir="temp"):
     """Download audio from YouTube or copy local file."""
     import yt_dlp
-    import imageio_ffmpeg
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_path = get_ffmpeg_path()
     
     if "youtube.com" in url_or_path or "youtu.be" in url_or_path:
-        # Use a unique ID to avoid file locks
         uid = int(time.time())
         output_file = f"bgm_{uid}.mp3"
         ydl_opts = {
@@ -53,246 +57,240 @@ def download_audio(url_or_path, output_dir="temp"):
     else:
         return url_or_path
 
-import proglog
+def get_media_info(path, is_video):
+    if is_video:
+        try:
+            from moviepy import VideoFileClip
+            with VideoFileClip(path) as clip:
+                dur = clip.duration
+                w, h = clip.size
+                has_audio = clip.audio is not None
+                return {"duration": dur, "w": w, "h": h, "has_audio": has_audio}
+        except Exception as e:
+            log_message(f"Error reading video metadata {path}: {e}")
+            return None
+    else:
+        try:
+            from PIL import Image
+            with Image.open(path) as img:
+                w, h = img.size
+                return {"duration": 0, "w": w, "h": h, "has_audio": False}
+        except Exception as e:
+            log_message(f"Error reading image metadata {path}: {e}")
+            return None
 
-class GuiLogger(proglog.ProgressBarLogger):
-    """Custom logger to send progress back to the GUI callback."""
-    def __init__(self, callback, expected_frames=None):
-        super().__init__()
-        self.gui_callback = callback
-        self.expected_frames = expected_frames
-    
-    def bars_callback(self, bar_prefix, bar, index, total):
-        # MoviePy 2.x uses this for frames/tasks
-        # We override the 'total' for frame_index to keep it stable
-        display_total = total
-        if bar_prefix == "frame_index" and self.expected_frames:
-            display_total = self.expected_frames
-            
-        if display_total and display_total > 0:
-            # Cap index at total to avoid overshooting
-            display_index = min(index, display_total)
-            # Pass detailed info back as a dict
-            self.gui_callback({
-                'prefix': bar_prefix,
-                'index': display_index,
-                'total': display_total,
-                'percentage': (display_index / display_total) * 100
-            })
-
-def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None, do_ducking=False, target_res=(1920, 1080)):
-    """Assemble images and videos into a single video with background music."""
+def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None, do_ducking=False, target_res=(1920, 1080), duck_volume=0.15):
+    """Assemble images and videos using highly optimized pure FFmpeg commands."""
     try:
-        from moviepy import ImageClip, VideoFileClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeVideoClip, CompositeAudioClip
-        import moviepy.video.fx as vfx
-        import moviepy.audio.fx as afx
-        import numpy as np
-        from PIL import Image, ImageFilter
+        log_message(f"Starting native FFmpeg video creation: target={target_duration_sec}s, res={target_res}, ducking={do_ducking}")
         
-        log_message(f"Starting video creation: target={target_duration_sec}s, res={target_res}, output={output_path}, ducking={do_ducking}")
-
-        # List all media files
         valid_img_exts = ('.jpg', '.jpeg', '.png', '.bmp')
         valid_vid_exts = ('.mp4', '.mov', '.avi')
         
         files = sorted([f for f in os.listdir(media_dir) if f.lower().endswith(valid_img_exts + valid_vid_exts)])
-        
         if not files:
             raise ValueError("資料夾中沒有發現有效的照片或影片檔案。")
 
-        # Target resolution
-        RES = target_res
-        FPS = 24
-        
-        def process_aspect_ratio(clip, target_res):
-            """Apply blurred background if clip aspect ratio differs from target."""
-            tw, th = target_res
-            cw, ch = clip.size
-            
-            # If aspect ratio matches (within tolerance), just resize
-            target_ratio = tw / th
-            clip_ratio = cw / ch
-            
-            if abs(target_ratio - clip_ratio) < 0.05:
-                return clip.resized(target_res)
-            
-            # Otherwise, create blurred background
-            # 1. Background: resize to fill and blur
-            bg = clip.resized(height=th) if clip_ratio > target_ratio else clip.resized(width=tw)
-            # Center crop bg to target_res
-            x1 = max(0, (bg.w - tw) // 2)
-            y1 = max(0, (bg.h - th) // 2)
-            bg = bg.cropped(x1=x1, y1=y1, x2=x1+tw, y2=y1+th)
-            try:
-                def blur_frame(image):
-                    pil_img = Image.fromarray(image)
-                    pil_img = pil_img.filter(ImageFilter.GaussianBlur(radius=20))
-                    return np.array(pil_img)
-                bg = bg.image_transform(blur_frame)
-            except Exception as e:
-                # Fallback or older moviepy
-                pass
-            
-            # 2. Foreground: resize to fit
-            fg = clip.resized(height=th) if clip_ratio < target_ratio else clip.resized(width=tw)
-            
-            # Ensure background has same duration as foreground
-            bg = bg.with_duration(fg.duration)
-            
-            comp = CompositeVideoClip([bg, fg.with_position("center")], size=target_res)
-            return comp.with_duration(fg.duration)
+        vid_files = [f for f in files if f.lower().endswith(valid_vid_exts)]
+        img_files = [f for f in files if f.lower().endswith(valid_img_exts)]
 
-        loaded_vid_clips = []
-        img_clips = []
-        try:
-            vid_files = [f for f in files if f.lower().endswith(valid_vid_exts)]
-            img_files = [f for f in files if f.lower().endswith(valid_img_exts)]
-            
-            # Pre-calculate video clips 
-            for f in vid_files:
-                path = os.path.join(media_dir, f)
-                clip = VideoFileClip(path)
-                
-                # If no ducking, we strip audio from source
-                if not do_ducking:
-                    clip = clip.without_audio()
-                
-                clip.fps = FPS
-                
-                original_dur = clip.duration
-                take_dur = min(max(original_dur, min_clip_dur), max_clip_dur)
-                take_dur = min(take_dur, original_dur)
-                
-                if take_dur < original_dur:
-                    clip = clip.subclipped(0, take_dur)
-                    
-                processed_clip = process_aspect_ratio(clip, RES)
-                processed_clip.fps = FPS
-                loaded_vid_clips.append(processed_clip)
-            
-            num_vids = len(loaded_vid_clips)
-            num_imgs = len(img_files)
-            num_total = num_vids + num_imgs
-            
-            sum_vid_durs = sum(c.duration for c in loaded_vid_clips)
-            
-            if num_imgs > 0:
-                total_img_dur_required = target_duration_sec - sum_vid_durs + (num_total - 1) * 0.5
-                img_duration = max(1.0, total_img_dur_required / num_imgs)
-            else:
-                img_duration = 0
+        # Phase 1: Metadata Extraction
+        media_list = []
+        sum_vid_durs = 0.0
+        
+        for f in vid_files:
+            path = os.path.join(media_dir, f)
+            info = get_media_info(path, True)
+            if info:
+                dur = info['duration']
+                take_dur = min(max(dur, min_clip_dur), max_clip_dur)
+                take_dur = min(take_dur, dur)
+                media_list.append({
+                    "path": path, "is_video": True, "target_dur": take_dur, 
+                    "has_audio": info['has_audio']
+                })
+                sum_vid_durs += take_dur
+
+        num_imgs = len(img_files)
+        img_duration = 0.0
+        if num_imgs > 0:
+            total_img_dur_required = target_duration_sec - sum_vid_durs + (len(vid_files) + num_imgs - 1) * 0.5
+            img_duration = max(1.0, total_img_dur_required / num_imgs)
             
             for f in img_files:
                 path = os.path.join(media_dir, f)
-                clip = ImageClip(path).with_duration(img_duration)
-                clip.fps = FPS
-                
-                final_img_dur = clip.duration
-                # Ken Burns (Apply before aspect ratio processing to maintain motion)
-                if random.random() > 0.5:
-                    clip = clip.resized(lambda t: 1.0 + 0.1 * (t / final_img_dur))
-                else:
-                    clip = clip.resized(lambda t: 1.1 - 0.1 * (t / final_img_dur))
-                
-                processed_clip = process_aspect_ratio(clip, RES)
-                processed_clip.fps = FPS
-                img_clips.append(processed_clip)
-                
-            final_clips = []
-            duck_intervals = []
-            curr_time = 0.0
-            
-            vid_idx = 0
-            img_idx = 0
-            for f in files:
-                is_vid = False
-                if f.lower().endswith(valid_img_exts):
-                    clip = img_clips[img_idx]
-                    img_idx += 1
-                else:
-                    clip = loaded_vid_clips[vid_idx]
-                    vid_idx += 1
-                    is_vid = True
-                
-                # Apply transition (CrossFadeIn)
-                # Note: We handle the overlapping manually via curr_time
-                if len(final_clips) > 0:
-                    trans_dur = min(0.5, clip.duration / 2)
-                    if trans_dur > 0:
-                        clip = clip.with_effects([vfx.CrossFadeIn(trans_dur)])
-                        curr_time -= trans_dur
-                
-                # Important: ducking interval must match the clip's final position in the timeline
-                if is_vid and do_ducking:
-                    duck_intervals.append((curr_time, curr_time + clip.duration))
+                info = get_media_info(path, False)
+                if info:
+                    media_list.append({
+                        "path": path, "is_video": False, "target_dur": img_duration, 
+                        "has_audio": False
+                    })
                     
-                final_clips.append(clip.with_start(curr_time))
-                curr_time += clip.duration
-         
-            # Using CompositeVideoClip instead of concatenate_videoclips 
-            # because we already manually handled start times and transitions
-            final_video = CompositeVideoClip(final_clips, size=RES)
-            final_video.fps = FPS
-            
-            if abs(final_video.duration - target_duration_sec) < 5.0:
-                final_video = final_video.with_duration(target_duration_sec)
-            
-            log_message(f"Loading audio: {audio_path}")
-            bgm = AudioFileClip(audio_path)
-            if bgm.duration < final_video.duration:
-                bgm = bgm.with_effects([afx.AudioLoop(duration=final_video.duration)])
+        # Sort media list to Original order based on filename
+        media_list.sort(key=lambda x: os.path.basename(x["path"]))
+        
+        # Build FFmpeg command
+        ffmpeg_exe = get_ffmpeg_path()
+        cmd = [ffmpeg_exe, "-y"]
+        
+        # Variables
+        tw, th = target_res
+        fps = 24
+        
+        # Inputs
+        for i, media in enumerate(media_list):
+            if not media['is_video']:
+                cmd.extend(["-t", str(media['target_dur']), "-loop", "1", "-framerate", str(fps), "-i", media['path']])
             else:
-                bgm = bgm.subclipped(0, final_video.duration)
-                
-            if do_ducking and duck_intervals:
-                log_message(f"Applying ducking to {len(duck_intervals)} intervals.")
-                ducking_effects = []
-                for start, end in duck_intervals:
-                    ducking_effects.append(afx.MultiplyVolume(0.15, start_time=start, end_time=end))
-                
-                bgm = bgm.with_effects(ducking_effects)
-                
-                if final_video.audio:
-                    log_message("Merging BGM with source audio...")
-                    final_audio = CompositeAudioClip([bgm, final_video.audio])
-                else:
-                    final_audio = bgm
-            else:
-                final_audio = bgm
-                
-            final_audio = final_audio.with_effects([afx.AudioFadeOut(2)])
-            final_video = final_video.with_audio(final_audio)
-            
-            # Accurate frame count for progress bar
-            total_frames = int(final_video.duration * FPS)
-            logger = GuiLogger(progress_callback, expected_frames=total_frames) if progress_callback else None
-            log_message(f"Starting write_videofile... duration={final_video.duration}")
-            
-            final_video.write_videofile(
-                output_path, 
-                fps=FPS, 
-                codec="libx264", 
-                audio_codec="aac",
-                audio_bitrate="192k",
-                audio_fps=44100,
-                logger=logger
-            )
-            log_message("write_videofile finished successfully.")
-            
-        finally:
-            log_message("Cleaning up clips...")
-            if 'final_video' in locals():
-                final_video.close()
-            if 'audio' in locals():
-                audio.close()
-            for c in loaded_vid_clips:
-                try: c.close()
-                except: pass
-            for c in img_clips:
-                try: c.close()
-                except: pass
-            log_message("Cleanup finished.")
+                cmd.extend(["-i", media['path']])
 
+        # BGM Input (Loop infinite at stream level)
+        bgm_idx = len(media_list)
+        cmd.extend(["-stream_loop", "-1", "-i", audio_path])
+        
+        # Variables
+        tw, th = target_res
+        fps = 24
+        
+        filter_lines = []
+        video_out_nodes = []
+        audio_out_nodes = []
+        duck_intervals = []
+        curr_t = 0.0
+        
+        # Phase 2 & 3: Filter Graph Generation
+        for i, media in enumerate(media_list):
+            dur = media['target_dur']
+            is_vid = media['is_video']
+            
+            filter_lines.append(f"[{i}:v]format=yuv420p,setsar=1[v{i}_norm];")
+            
+            if is_vid:
+                # Video processing: Scale and pad to fit target resolution, then blur background
+                filter_lines.append(f"[v{i}_norm]split=2[v{i}_bg][v{i}_fg];")
+                filter_lines.append(f"[v{i}_bg]scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},boxblur=20:5[bg{i}];")
+                filter_lines.append(f"[v{i}_fg]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg{i}];")
+                filter_lines.append(f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,trim=0:{dur},setpts=PTS-STARTPTS,fps={fps}[base{i}];")
+            else:
+                frames = int(dur * fps)
+                zoom_expr = "min(zoom+0.001,1.1)" if i % 2 == 0 else "max(1.1-0.001*on,1.0)"
+                
+                # Image Processing: 
+                # 1. Create a static properly sized/padded frame first
+                filter_lines.append(f"[v{i}_norm]split=2[v{i}_bg][v{i}_fg];")
+                filter_lines.append(f"[v{i}_bg]scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},boxblur=20:5[bg{i}];")
+                filter_lines.append(f"[v{i}_fg]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg{i}];")
+                filter_lines.append(f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,scale=iw*3:ih*3[base_img{i}];")
+                
+                # 2. Apply zoompan to the padded image. Since input aspect ratio == output aspect ratio, stretching is disabled.
+                filter_lines.append(f"[base_img{i}]zoompan=z='{zoom_expr}':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={tw}x{th},setpts=PTS-STARTPTS,fps={fps}[base{i}];")
+                
+            video_out_nodes.append(f"[base{i}]")
+            
+            # Audio Handling
+            if is_vid and media['has_audio']:
+                if do_ducking:
+                    duck_intervals.append((curr_t, curr_t + dur))
+                filter_lines.append(f"[{i}:a]atrim=0:{dur},asetpts=PTS-STARTPTS[a{i}_t];")
+                delay_ms = int(curr_t * 1000)
+                if delay_ms > 0:
+                    filter_lines.append(f"[a{i}_t]adelay={delay_ms}|{delay_ms}[a{i}_dl];")
+                    audio_out_nodes.append(f"[a{i}_dl]")
+                else:
+                    audio_out_nodes.append(f"[a{i}_t]")
+                    
+            curr_t += dur - 0.5  # 0.5s fade
+            
+        bgm_dur = curr_t + 0.5 # Total exact output duration
+        
+        # Frame exact calculation
+        if len(video_out_nodes) == 1:
+            filter_lines.append(f"{video_out_nodes[0]}copy[vout];")
+        else:
+            last_out = video_out_nodes[0]
+            # Time at which the NEXT clip should START fading in
+            current_video_length = media_list[0]['target_dur'] 
+            
+            for i in range(1, len(video_out_nodes)):
+                xfade_offset = current_video_length - 0.5
+                filter_lines.append(f"{last_out}{video_out_nodes[i]}xfade=transition=fade:duration=0.5:offset={xfade_offset:.3f},fps={fps}[xf{i}];")
+                last_out = f"[xf{i}]"
+                
+                # The new total length is the old length + new video length - 0.5 overlap
+                current_video_length = current_video_length + media_list[i]['target_dur'] - 0.5
+                
+            filter_lines.append(f"{last_out}copy[vout];")
+
+        # BGM Processing
+        filter_lines.append(f"[{bgm_idx}:a]atrim=0:{bgm_dur},asetpts=PTS-STARTPTS[bgm_base];")
+        
+        if do_ducking and duck_intervals:
+            duck_expr = "+".join([f"between(t,{s},{e})" for s, e in duck_intervals])
+            filter_lines.append(f"[bgm_base]volume={duck_volume}:enable='{duck_expr}'[bgm_duck];")
+            bgm_out = "[bgm_duck]"
+        else:
+            bgm_out = "[bgm_base]"
+            
+        if audio_out_nodes:
+            amix_inputs = "".join(audio_out_nodes) + bgm_out
+            num_inputs = len(audio_out_nodes) + 1
+            filter_lines.append(f"{amix_inputs}amix=inputs={num_inputs}:duration=longest:dropout_transition=2[aout_mix];")
+        else:
+            filter_lines.append(f"{bgm_out}anull[aout_mix];")
+            
+        fade_start = max(0, bgm_dur - 2.0)
+        filter_lines.append(f"[aout_mix]afade=t=out:st={fade_start}:d=2[aout];")
+        
+        filter_txt = "temp_filter.txt"
+        with open(filter_txt, "w", encoding="utf-8") as f:
+            f.write("\n".join(filter_lines))
+            
+        total_frames = int(bgm_dur * fps)
+        
+        cmd.extend([
+            "-filter_complex_script", filter_txt,
+            "-map", "[vout]",
+            "-map", "[aout]",
+            "-c:v", "libx264",
+            "-preset", "faster",  # Significantly faster encoding
+            "-threads", "8",      # Multi-treading
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-r", str(fps),
+            "-t", str(bgm_dur),   # Force exact stop time
+            output_path
+        ])
+
+        log_message(f"FFmpeg command: {' '.join(cmd)}")
+        
+        # Phase 4: Execution
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            encoding='utf-8'
+        )
+        
+        for line in process.stderr:
+            if "frame=" in line and "fps=" in line:
+                m = re.search(r'frame=\s*(\d+)', line)
+                if m and progress_callback:
+                    current_frame = int(m.group(1))
+                    progress_callback({
+                        "prefix": "frame_index",
+                        "index": current_frame,
+                        "total": total_frames,
+                        "percentage": (current_frame / max(1, total_frames)) * 100
+                    })
+            log_message(line.strip())
+            
+        process.wait()
+        
+        if process.returncode != 0:
+            raise RuntimeError(f"FFmpeg failed with exit code {process.returncode}. See fastclip_debug.log")
+
+        log_message("create_video finished successfully.")
     except Exception as e:
         err_msg = traceback.format_exc()
         log_message(f"CRITICAL ERROR in create_video: {err_msg}")

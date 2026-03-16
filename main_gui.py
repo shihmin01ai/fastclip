@@ -59,15 +59,19 @@ class FastClipApp:
         tk.Label(settings_frame, text="照片 (2~5):", bg="#f8f9fa").grid(row=0, column=0, sticky="w")
         self.photo_dur_var = tk.StringVar(value="3")
         self.photo_dur_var.trace_add("write", lambda *args: self.auto_calc_total())
-        tk.Entry(settings_frame, textvariable=self.photo_dur_var, width=8).grid(row=0, column=1, sticky="w", padx=(5, 15))
+        tk.Entry(settings_frame, textvariable=self.photo_dur_var, width=5).grid(row=0, column=1, sticky="w", padx=(5, 15))
 
         tk.Label(settings_frame, text="影片 (5~30):", bg="#f8f9fa").grid(row=0, column=2, sticky="w")
         self.video_dur_var = tk.StringVar(value="8")
         self.video_dur_var.trace_add("write", lambda *args: self.auto_calc_total())
-        tk.Entry(settings_frame, textvariable=self.video_dur_var, width=8).grid(row=0, column=3, sticky="w", padx=5)
+        tk.Entry(settings_frame, textvariable=self.video_dur_var, width=5).grid(row=0, column=3, sticky="w", padx=5)
 
-        self.do_ducking_var = tk.BooleanVar(value=False)
+        self.do_ducking_var = tk.BooleanVar(value=True)
         tk.Checkbutton(settings_frame, text="背景樂閃避", variable=self.do_ducking_var, bg="#f8f9fa", font=("Microsoft JhengHei", 8)).grid(row=0, column=4, padx=(15, 0))
+        
+        tk.Label(settings_frame, text="音量(%):", bg="#f8f9fa").grid(row=0, column=5, sticky="w", padx=(5, 0))
+        self.duck_vol_var = tk.StringVar(value="15")
+        tk.Entry(settings_frame, textvariable=self.duck_vol_var, width=4).grid(row=0, column=6, sticky="w", padx=(2, 5))
 
         # Output Aspect Ratio
         tk.Label(main_frame, text="輸出比例:", bg="#f8f9fa", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w", pady=(5, 0))
@@ -176,6 +180,10 @@ class FastClipApp:
             v_max = float(self.video_dur_var.get())
             if not 5 <= v_max <= 30: raise ValueError("影片單段時間需介於 5~30 秒！")
             
+            duck_v = float(self.duck_vol_var.get())
+            if not 0 <= duck_v <= 100: raise ValueError("閃避音量需介於 0~100 %！")
+            duck_volume = duck_v / 100.0
+            
             total_sec = self.calculated_total_sec
             if total_sec <= 0: raise ValueError("請先選擇素材資料夾！")
         except ValueError as e:
@@ -196,9 +204,9 @@ class FastClipApp:
         ratio_str = self.ratio_var.get()
         target_res = (1920, 1080) if "16:9" in ratio_str else (1080, 1920)
         
-        threading.Thread(target=self.process_thread, args=(media_dir, audio_src, out_dir, total_sec, 3, v_max, target_res), daemon=True).start()
+        threading.Thread(target=self.process_thread, args=(media_dir, audio_src, out_dir, total_sec, 3, v_max, target_res, duck_volume), daemon=True).start()
 
-    def process_thread(self, media_dir, audio_src, out_dir, duration, c_min, c_max, target_res):
+    def process_thread(self, media_dir, audio_src, out_dir, duration, c_min, c_max, target_res, duck_volume):
         try:
             self.update_status("正在準備素材...", 5)
             audio_path = video_engine.download_audio(audio_src)
@@ -227,7 +235,7 @@ class FastClipApp:
 
             self.update_status("正在啟動合成引擎...", 10)
             do_ducking = self.do_ducking_var.get()
-            video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb, do_ducking=do_ducking, target_res=target_res)
+            video_engine.create_video(media_dir, audio_path, duration, output_path, c_min, c_max, progress_callback=prog_cb, do_ducking=do_ducking, target_res=target_res, duck_volume=duck_volume)
             
             self.update_status("正在整理最終檔案...", 95)
             # Copy audio to output folder if it's a downloaded file
