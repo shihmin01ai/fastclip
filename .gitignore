@@ -5,6 +5,7 @@ dist/
 temp/
 *.mp4
 *.log
+*.html
 *.code-workspace
 debug*.py
 test_single.py
