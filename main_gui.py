@@ -42,7 +42,8 @@ class FastClipApp:
         dir_frame.pack(fill="x", pady=(2, 2))
         self.media_dir_var = tk.StringVar()
         tk.Entry(dir_frame, textvariable=self.media_dir_var, font=("Segoe UI", 9)).pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Button(dir_frame, text="瀏覽...", command=self.browse_dir).pack(side="right")
+        self.btn_browse_dir = ttk.Button(dir_frame, text="瀏覽...", command=self.browse_dir)
+        self.btn_browse_dir.pack(side="right")
         
         self.count_label = tk.Label(main_frame, text="尚未選取素材", bg="#f8f9fa", fg="#3498db", font=("Microsoft JhengHei", 8))
         self.count_label.pack(anchor="w", pady=(0, 8))
@@ -88,7 +89,8 @@ class FastClipApp:
         audio_frame.pack(fill="x", pady=(2, 8))
         self.audio_source_var = tk.StringVar()
         tk.Entry(audio_frame, textvariable=self.audio_source_var, font=("Segoe UI", 9)).pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Button(audio_frame, text="選擇...", command=self.browse_audio).pack(side="right")
+        self.btn_browse_audio = ttk.Button(audio_frame, text="選擇...", command=self.browse_audio)
+        self.btn_browse_audio.pack(side="right")
 
         # Output Directory
         tk.Label(main_frame, text="3. 儲存路徑:", bg="#f8f9fa", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
@@ -96,7 +98,8 @@ class FastClipApp:
         out_frame.pack(fill="x", pady=(2, 8))
         self.output_dir_var = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "Desktop"))
         tk.Entry(out_frame, textvariable=self.output_dir_var, font=("Segoe UI", 9)).pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Button(out_frame, text="瀏覽...", command=self.browse_output_dir).pack(side="right")
+        self.btn_browse_out = ttk.Button(out_frame, text="瀏覽...", command=self.browse_output_dir)
+        self.btn_browse_out.pack(side="right")
 
         # Total Duration (Read Only)
         self.total_dur_text = tk.StringVar(value="預估影片長度: 0 分 0 秒")
@@ -117,6 +120,12 @@ class FastClipApp:
 
         self.file_counts = {"img": 0, "vid": 0}
 
+    def set_ui_state(self, state):
+        self.btn_browse_dir.config(state=state)
+        self.btn_browse_audio.config(state=state)
+        self.btn_browse_out.config(state=state)
+        self.start_btn.config(state=state)
+
     def browse_dir(self):
         directory = filedialog.askdirectory()
         if directory:
@@ -124,7 +133,7 @@ class FastClipApp:
             self.update_file_counts(directory)
 
     def update_file_counts(self, directory):
-        valid_img_exts = ('.jpg', '.jpeg', '.png', '.bmp')
+        valid_img_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.heic', '.heif')
         valid_vid_exts = ('.mp4', '.mov', '.avi')
         try:
             files = os.listdir(directory)
@@ -198,7 +207,7 @@ class FastClipApp:
             messagebox.showerror("錯誤", "資料不完整！")
             return
 
-        self.start_btn.config(state="disabled")
+        self.set_ui_state("disabled")
         
         # Determine target resolution
         ratio_str = self.ratio_var.get()
@@ -257,7 +266,7 @@ class FastClipApp:
             self.update_status("發生錯誤", 0)
             messagebox.showerror("錯誤", str(e))
         finally:
-            self.start_btn.config(state="normal")
+            self.set_ui_state("normal")
 
 if __name__ == "__main__":
     root = tk.Tk()

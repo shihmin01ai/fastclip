@@ -60,7 +60,7 @@ def download_audio(url_or_path, output_dir="temp"):
 def get_media_info(path, is_video):
     if is_video:
         try:
-            from moviepy import VideoFileClip
+            from moviepy.editor import VideoFileClip
             with VideoFileClip(path) as clip:
                 dur = clip.duration
                 w, h = clip.size
@@ -79,7 +79,7 @@ def get_media_info(path, is_video):
             log_message(f"Error reading image metadata {path}: {e}")
             return None
 
-def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None, do_ducking=False, target_res=(1920, 1080), duck_volume=0.15):
+def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None, do_ducking=False, target_res=(1920, 1080)):
     """Assemble images and videos using highly optimized pure FFmpeg commands."""
     try:
         log_message(f"Starting native FFmpeg video creation: target={target_duration_sec}s, res={target_res}, ducking={do_ducking}")
@@ -149,14 +149,10 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
         ffmpeg_exe = get_ffmpeg_path()
         cmd = [ffmpeg_exe, "-y"]
         
-        # Variables
-        tw, th = target_res
-        fps = 24
-        
         # Inputs
         for i, media in enumerate(media_list):
             if not media['is_video']:
-                cmd.extend(["-t", str(media['target_dur']), "-loop", "1", "-framerate", str(fps), "-i", media['path']])
+                cmd.extend(["-t", str(media['target_dur']), "-loop", "1", "-i", media['path']])
             else:
                 cmd.extend(["-i", media['path']])
 
@@ -182,25 +178,18 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             filter_lines.append(f"[{i}:v]format=yuv420p,setsar=1[v{i}_norm];")
             
             if is_vid:
-                # Video processing: Scale and pad to fit target resolution, then blur background
-                filter_lines.append(f"[v{i}_norm]split=2[v{i}_bg][v{i}_fg];")
-                filter_lines.append(f"[v{i}_bg]scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},boxblur=20:5[bg{i}];")
-                filter_lines.append(f"[v{i}_fg]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg{i}];")
-                filter_lines.append(f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,trim=0:{dur},setpts=PTS-STARTPTS,fps={fps}[base{i}];")
+                filter_lines.append(f"[v{i}_norm]trim=0:{dur},setpts=PTS-STARTPTS[v{i}_trim];")
+                v_in = f"v{i}_trim"
             else:
                 frames = int(dur * fps)
                 zoom_expr = "min(zoom+0.001,1.1)" if i % 2 == 0 else "max(1.1-0.001*on,1.0)"
-                
-                # Image Processing: 
-                # 1. Create a static properly sized/padded frame first
-                filter_lines.append(f"[v{i}_norm]split=2[v{i}_bg][v{i}_fg];")
-                filter_lines.append(f"[v{i}_bg]scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},boxblur=20:5[bg{i}];")
-                filter_lines.append(f"[v{i}_fg]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg{i}];")
-                filter_lines.append(f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,scale=iw*3:ih*3[base_img{i}];")
-                
-                # 2. Apply zoompan to the padded image. Since input aspect ratio == output aspect ratio, stretching is disabled.
-                filter_lines.append(f"[base_img{i}]zoompan=z='{zoom_expr}':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={tw}x{th},setpts=PTS-STARTPTS,fps={fps}[base{i}];")
-                
+                filter_lines.append(f"[v{i}_norm]scale=4000:-1,zoompan=z='{zoom_expr}':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={tw}x{th}:fps={fps}[v{i}_zp];")
+                v_in = f"v{i}_zp"
+            
+            # Blurred background + Foreground
+            filter_lines.append(f"[{v_in}]scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},boxblur=20:5[bg{i}];")
+            filter_lines.append(f"[{v_in}]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg{i}];")
+            filter_lines.append(f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,setpts=PTS-STARTPTS[base{i}];")
             video_out_nodes.append(f"[base{i}]")
             
             # Audio Handling
@@ -224,17 +213,12 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             filter_lines.append(f"{video_out_nodes[0]}copy[vout];")
         else:
             last_out = video_out_nodes[0]
-            # Time at which the NEXT clip should START fading in
-            current_video_length = media_list[0]['target_dur'] 
-            
+            accum_t = media_list[0]['target_dur']
             for i in range(1, len(video_out_nodes)):
-                xfade_offset = current_video_length - 0.5
-                filter_lines.append(f"{last_out}{video_out_nodes[i]}xfade=transition=fade:duration=0.5:offset={xfade_offset:.3f},fps={fps}[xf{i}];")
+                xfade_t = accum_t - 0.5
+                filter_lines.append(f"{last_out}{video_out_nodes[i]}xfade=transition=fade:duration=0.5:offset={xfade_t}[xf{i}];")
                 last_out = f"[xf{i}]"
-                
-                # The new total length is the old length + new video length - 0.5 overlap
-                current_video_length = current_video_length + media_list[i]['target_dur'] - 0.5
-                
+                accum_t += media_list[i]['target_dur'] - 0.5
             filter_lines.append(f"{last_out}copy[vout];")
 
         # BGM Processing
@@ -242,7 +226,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
         
         if do_ducking and duck_intervals:
             duck_expr = "+".join([f"between(t,{s},{e})" for s, e in duck_intervals])
-            filter_lines.append(f"[bgm_base]volume={duck_volume}:enable='{duck_expr}'[bgm_duck];")
+            filter_lines.append(f"[bgm_base]volume=0.15:enable='{duck_expr}'[bgm_duck];")
             bgm_out = "[bgm_duck]"
         else:
             bgm_out = "[bgm_base]"
@@ -250,9 +234,9 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
         if audio_out_nodes:
             amix_inputs = "".join(audio_out_nodes) + bgm_out
             num_inputs = len(audio_out_nodes) + 1
-            filter_lines.append(f"{amix_inputs}amix=inputs={num_inputs}:duration=longest:dropout_transition=2[aout_mix];")
+            filter_lines.append(f"{amix_inputs}amix=inputs={num_inputs}:duration=first:dropout_transition=2[aout_mix];")
         else:
-            filter_lines.append(f"{bgm_out}anull[aout_mix];")
+            filter_lines.append(f"{bgm_out}copy[aout_mix];")
             
         fade_start = max(0, bgm_dur - 2.0)
         filter_lines.append(f"[aout_mix]afade=t=out:st={fade_start}:d=2[aout];")
@@ -274,6 +258,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
             "-b:a", "192k",
             "-r", str(fps),
             "-t", str(bgm_dur),   # Force exact stop time
+            "-shortest", 
             output_path
         ])
 
@@ -282,7 +267,7 @@ def create_video(media_dir, audio_path, target_duration_sec, output_path="output
         # Phase 4: Execution
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
             encoding='utf-8'
