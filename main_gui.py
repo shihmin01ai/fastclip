@@ -71,7 +71,7 @@ class FastClipApp:
         tk.Checkbutton(settings_frame, text="背景樂閃避", variable=self.do_ducking_var, bg="#f8f9fa", font=("Microsoft JhengHei", 8)).grid(row=0, column=4, padx=(15, 0))
         
         tk.Label(settings_frame, text="音量(%):", bg="#f8f9fa").grid(row=0, column=5, sticky="w", padx=(5, 0))
-        self.duck_vol_var = tk.StringVar(value="15")
+        self.duck_vol_var = tk.StringVar(value="30")
         tk.Entry(settings_frame, textvariable=self.duck_vol_var, width=4).grid(row=0, column=6, sticky="w", padx=(2, 5))
 
         # Output Aspect Ratio

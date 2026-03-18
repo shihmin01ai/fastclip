@@ -79,7 +79,7 @@ def get_media_info(path, is_video):
             log_message(f"Error reading image metadata {path}: {e}")
             return None
 
-def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None, do_ducking=False, target_res=(1920, 1080), duck_volume=0.15):
+def create_video(media_dir, audio_path, target_duration_sec, output_path="output.mp4", min_clip_dur=3, max_clip_dur=10, progress_callback=None, do_ducking=False, target_res=(1920, 1080), duck_volume=0.30):
     """Assemble images and videos using highly optimized pure FFmpeg commands."""
     try:
         log_message(f"Starting native FFmpeg video creation: target={target_duration_sec}s, res={target_res}, ducking={do_ducking}")
